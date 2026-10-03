@@ -4,6 +4,9 @@ on:
   push:
     branches: ["**"]
   pull_request:
+  schedule:
+    - cron: "43 */8 * * *" # three real runs a day on main, so the history never goes stale
+  workflow_dispatch:
 
 jobs:
   test:
@@ -21,10 +24,13 @@ jobs:
         run: pytest --junitxml=report.xml
 
       # Runs even if the tests above failed, so a failing/flaky run still gets recorded.
+      # The backend runs on a free tier that sleeps when idle and takes about a minute to
+      # wake, so this waits and retries. Retrying is safe: ingestion is idempotent.
       - name: Upload results to flaky-detector
         if: always()
         run: |
           curl -sS -f -X POST "${{ vars.FLAKY_DETECTOR_URL }}/api/ingest/" \
+            --retry 5 --retry-delay 15 --retry-connrefused --max-time 120 \
             -H "Authorization: Bearer ${{ secrets.FLAKY_DETECTOR_TOKEN }}" \
             -F "report=@report.xml" \
             -F "run_id=${{ github.run_id }}" \
